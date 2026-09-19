@@ -34,3 +34,7 @@ Workflow сам скачивает модель `hand_landmarker.task`, поэт
 ## Почему проект Java
 
 Первая Android-версия сделана на Java, чтобы убрать зависимость от Kotlin compiler и сделать CI-проект проще. Android Gradle Plugin 9.4.0 и Gradle 9.6.0 соответствуют текущей официальной таблице совместимости Android Studio/AGP на момент подготовки архива.
+
+
+### Важно для GitHub Actions
+Workflow использует `android-actions/setup-android@v4` и не запрашивает устаревший пакет `tools`. Это специально сделано из-за изменения Android SDK, из-за которого `sdkmanager tools` теперь завершается ошибкой. Workflow использует AGP 9.4.0 + Gradle 9.6.0 + JDK 17.

@@ -15,47 +15,76 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
 
       - name: Install Android SDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Setup Gradle 9.6
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.6.0'
+
+      - name: Verify project files
+        shell: bash
+        run: |
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/handar/browser/MainActivity.java
+          test -f app/src/main/java/com/handar/browser/HandOverlayView.java
+          forbidden="sdkmanager tools"
+          ! grep -R -n --exclude-dir=.git --exclude='README_RU.md' --exclude='THIRD_PARTY_NOTICES.md' --fixed-strings "$forbidden" .
+          grep -n 'id("com.android.application") version "9.4.0"' build.gradle.kts
+          grep -n 'gradle-version: .9.6.0' .github/workflows/build-apk.yml
+          echo "Project structure check: OK"
 
       - name: Download MediaPipe hand model
         shell: bash
         run: |
           mkdir -p app/src/main/assets
-          curl -L --fail --retry 3 \
+          curl -L --fail --retry 3 --retry-delay 2 \
             -o app/src/main/assets/hand_landmarker.task \
             "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
           test -s app/src/main/assets/hand_landmarker.task
+          file app/src/main/assets/hand_landmarker.task
           ls -lh app/src/main/assets/hand_landmarker.task
 
+      - name: Validate Gradle configuration
+        run: gradle --no-daemon --stacktrace help
+
       - name: Build release APK
-        run: gradle --no-daemon --stacktrace assembleRelease
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
 
       - name: Verify APK
+        shell: bash
         run: |
-          test -f app/build/outputs/apk/release/app-release.apk
-          ls -lh app/build/outputs/apk/release/app-release.apk
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          file "$APK"
+          unzip -t "$APK" >/dev/null
+          echo "APK OK: $(du -h "$APK" | cut -f1)"
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HandARBrowser-APK
           path: app/build/outputs/apk/release/app-release.apk
