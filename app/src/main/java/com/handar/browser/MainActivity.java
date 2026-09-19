@@ -59,6 +59,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mediapipe.framework.image.BitmapImageBuilder;
 import com.google.mediapipe.framework.image.MPImage;
 import com.google.mediapipe.tasks.core.BaseOptions;
+import com.google.mediapipe.tasks.core.Delegate;
 import com.google.mediapipe.tasks.vision.core.RunningMode;
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker;
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult;
@@ -111,6 +112,9 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
     private float lastCursorY = -1f;
 
     private boolean keyboardVisible = false;
+    private boolean handTrackingEnabled = false;
+    private boolean handTrackingBusy = false;
+    private long lastVideoTimestamp = 0L;
     private boolean keyboardRussian = false;
     private boolean focusInWebPage = false;
 
@@ -218,7 +222,7 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
         s.setBuiltInZoomControls(false);
         s.setDisplayZoomControls(false);
         s.setSupportZoom(false);
-        s.setUserAgentString(s.getUserAgentString() + " HandARBrowser/1.0");
+        s.setUserAgentString(s.getUserAgentString() + " HandARBrowser/1.0 A17");
         v.setWebChromeClient(new WebChromeClient());
         v.addJavascriptInterface(new WebBridge(), "HandARBridge");
         v.setWebViewClient(new WebViewClient() {
@@ -301,6 +305,7 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
         centerButton = smallButton("CENTER");
         rightButton = smallButton("RIGHT");
         Button key = smallButton("⌨");
+        Button hands = smallButton("✋");
 
         back.setOnClickListener(v -> bothWeb("history.back();"));
         forward.setOnClickListener(v -> bothWeb("history.forward();"));
@@ -309,8 +314,9 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
         leftButton.setOnClickListener(v -> nudgeBrowser(-35f));
         rightButton.setOnClickListener(v -> nudgeBrowser(35f));
         key.setOnClickListener(v -> setKeyboardVisible(!keyboardVisible));
+        hands.setOnClickListener(v -> toggleHandTracking());
 
-        for (Button b : new Button[]{back, forward, reload, leftButton, centerButton, rightButton, key}) {
+        for (Button b : new Button[]{back, forward, reload, leftButton, centerButton, rightButton, key, hands}) {
             controls.addView(b, new LinearLayout.LayoutParams(dp(74), dp(50)));
             interactiveViews.add(b);
         }
@@ -414,28 +420,62 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
     private void setupMediaPipe() {
-        try {
-            BaseOptions baseOptions = BaseOptions.builder().setModelAssetPath("hand_landmarker.task").build();
-            HandLandmarker.HandLandmarkerOptions options = HandLandmarker.HandLandmarkerOptions.builder()
-                    .setBaseOptions(baseOptions)
-                    .setMinHandDetectionConfidence(0.50f)
-                    .setMinHandPresenceConfidence(0.50f)
-                    .setMinTrackingConfidence(0.50f)
-                    .setNumHands(2)
-                    .setRunningMode(RunningMode.LIVE_STREAM)
-                    .setResultListener(this::onHandResult)
-                    .setErrorListener(error -> Log.e(TAG, "MediaPipe: " + error.getMessage()))
-                    .build();
-            handLandmarker = HandLandmarker.createFromOptions(this, options);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to initialize hand tracking", e);
-            runOnUiThread(() -> statusTextSafe("Руки: ошибка загрузки модели"));
+        if (handTrackingBusy || handLandmarker != null) return;
+        handTrackingBusy = true;
+        statusTextSafe("Руки: запуск CPU режима...");
+        cameraExecutor.execute(() -> {
+            try {
+                BaseOptions baseOptions = BaseOptions.builder()
+                        .setModelAssetPath("hand_landmarker.task")
+                        .setDelegate(Delegate.CPU)
+                        .build();
+                HandLandmarker.HandLandmarkerOptions options = HandLandmarker.HandLandmarkerOptions.builder()
+                        .setBaseOptions(baseOptions)
+                        .setMinHandDetectionConfidence(0.55f)
+                        .setMinHandPresenceConfidence(0.55f)
+                        .setMinTrackingConfidence(0.55f)
+                        .setNumHands(1)
+                        .setRunningMode(RunningMode.VIDEO)
+                        .build();
+                HandLandmarker created = HandLandmarker.createFromOptions(this, options);
+                runOnUiThread(() -> {
+                    handLandmarker = created;
+                    handTrackingBusy = false;
+                    handTrackingEnabled = true;
+                    lastVideoTimestamp = 0L;
+                    statusTextSafe("Руки: CPU • 1 рука • готово");
+                });
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to initialize hand tracking", t);
+                runOnUiThread(() -> {
+                    handTrackingBusy = false;
+                    handTrackingEnabled = false;
+                    handLandmarker = null;
+                    statusTextSafe("Руки: недоступны на этом устройстве");
+                    Toast.makeText(this, "Отслеживание рук не запустилось. Камера и браузер продолжают работать.", Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
+    private void toggleHandTracking() {
+        if (handTrackingBusy) return;
+        if (handLandmarker != null) {
+            handTrackingEnabled = false;
+            HandLandmarker current = handLandmarker;
+            handLandmarker = null;
+            cameraExecutor.execute(() -> {
+                try { current.close(); } catch (Throwable ignored) {}
+            });
+            overlay.clearAll();
+            statusTextSafe("Руки: выключены");
+            return;
         }
+        setupMediaPipe();
     }
 
     private void startCamera() {
         statusTextSafe("Камера запускается...");
-        setupMediaPipe();
         ListenableFuture<ProcessCameraProvider> future = ProcessCameraProvider.getInstance(this);
         future.addListener(() -> {
             try {
@@ -467,7 +507,7 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
 
         try {
             camera = cameraProvider.bindToLifecycle(this, selector, p1, p2, analysis);
-            statusTextSafe("Камера: OK • руки: поиск...");
+            statusTextSafe("Камера: OK • руки: нажми ✋");
         } catch (Exception e) {
             Log.e(TAG, "Stereo camera bind failed; using one preview", e);
             try {
@@ -476,7 +516,7 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
                 fallback.setSurfaceProvider(previewLeft.getSurfaceProvider());
                 camera = cameraProvider.bindToLifecycle(this, selector, fallback, analysis);
                 previewRight.setVisibility(View.GONE);
-                statusTextSafe("Камера: OK • режим совместимости");
+                statusTextSafe("Камера: OK • совместимость • руки: нажми ✋");
             } catch (Exception second) {
                 Log.e(TAG, "Fallback camera bind failed", second);
                 statusTextSafe("Камера: не удалось запустить");
@@ -485,22 +525,44 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
     }
 
     private void analyzeFrame(ImageProxy proxy) {
+        Bitmap bitmap = null;
+        Bitmap rotated = null;
         try {
-            if (handLandmarker == null) return;
+            HandLandmarker detector = handLandmarker;
+            if (!handTrackingEnabled || detector == null) return;
             int w = proxy.getWidth();
             int h = proxy.getHeight();
-            Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             proxy.getPlanes()[0].getBuffer().rewind();
             bitmap.copyPixelsFromBuffer(proxy.getPlanes()[0].getBuffer());
+
             int rotation = proxy.getImageInfo().getRotationDegrees();
-            Bitmap rotated = rotateBitmap(bitmap, rotation);
+            rotated = rotateBitmap(bitmap, rotation);
             if (rotated != bitmap) bitmap.recycle();
+            bitmap = null;
+
+            // Keep inference light enough for entry-level devices such as Galaxy A17.
+            int maxDim = Math.max(rotated.getWidth(), rotated.getHeight());
+            if (maxDim > 640) {
+                float scale = 640f / maxDim;
+                int nw = Math.max(1, Math.round(rotated.getWidth() * scale));
+                int nh = Math.max(1, Math.round(rotated.getHeight() * scale));
+                Bitmap scaled = Bitmap.createScaledBitmap(rotated, nw, nh, true);
+                if (scaled != rotated) rotated.recycle();
+                rotated = scaled;
+            }
+
             MPImage mpImage = new BitmapImageBuilder(rotated).build();
             long timestamp = SystemClock.uptimeMillis();
-            handLandmarker.detectAsync(mpImage, timestamp);
+            if (timestamp <= lastVideoTimestamp) timestamp = lastVideoTimestamp + 1L;
+            lastVideoTimestamp = timestamp;
+            HandLandmarkerResult result = detector.detectForVideo(mpImage, timestamp);
+            onHandResult(result, mpImage);
         } catch (Throwable t) {
             Log.e(TAG, "Frame analysis failed", t);
         } finally {
+            if (bitmap != null) bitmap.recycle();
+            if (rotated != null && !rotated.isRecycled()) rotated.recycle();
             proxy.close();
         }
     }

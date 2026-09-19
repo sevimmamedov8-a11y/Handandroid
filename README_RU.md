@@ -1,24 +1,14 @@
-# HandARBrowser Android V12
+# HandARBrowser Android V13 — Galaxy A17 compatibility build
 
-Отдельная Android-версия HandARBrowser для телефона в VR-очках.
+V13 специально подготовлена для проверки запуска на Samsung Galaxy A17 / Android 16 / One UI 8.0.
 
-## Что исправлено в V12
+Изменения:
+- камера и браузер запускаются **без инициализации MediaPipe**;
+- отслеживание рук включается кнопкой **✋** после запуска камеры;
+- MediaPipe работает в **CPU** режиме;
+- максимум **1 рука**;
+- режим MediaPipe: **VIDEO**, без LIVE_STREAM очереди;
+- входной кадр уменьшается до максимум 640 px по большей стороне;
+- если hand tracking не запускается, приложение остаётся открытым с рабочими камерой, браузером и гироскопом.
 
-- `MainActivity` теперь наследуется от `androidx.activity.ComponentActivity`, поэтому корректно удовлетворяет `LifecycleOwner`, который нужен `ProcessCameraProvider.bindToLifecycle(...)`.
-- Для `MPImage` используются официальные Java-методы `getWidth()` и `getHeight()` вместо несуществующих `width()` / `height()`.
-- GitHub Actions переведён на `android-actions/setup-android@v4` и Node 24-compatible actions.
-- Runner закреплён на `ubuntu-24.04`, чтобы сборка не зависела от миграции `ubuntu-latest`.
-- Gradle 9.6.0 + Android Gradle Plugin 9.4.0 + JDK 17 сохранены: это совместимая связка для AGP 9.4.
-- Исправлена проверка результата Gradle: AGP может выдавать `app-release-unsigned.apk`, поэтому workflow больше не ожидает только одно имя файла.
-- APK нормализуется в `dist/HandARBrowser.apk` перед загрузкой artifact.
-- Release APK подписывается временным debug-ключом GitHub runner, чтобы полученный APK можно было установить для тестирования без отдельной подписи. Для следующей сборки подпись может отличаться, поэтому обновление поверх предыдущей тестовой сборки может потребовать удаления старой версии.
-- Перед сборкой workflow выполняет preflight-проверки именно тех мест, на которых упал предыдущий билд.
-
-## Сборка
-
-1. Загрузить содержимое ZIP в отдельный GitHub-репозиторий.
-2. Сделать commit и Push в `main`.
-3. Открыть GitHub → Actions → `Build HandARBrowser Android`.
-4. После зелёной галочки открыть Artifacts → `HandARBrowser-APK`.
-
-Полную APK-сборку в этом окружении я не заявляю как локально протестированную: здесь нет полного Android SDK/Gradle окружения. Сам CI workflow содержит предсборочные проверки и затем реальную сборку на GitHub runner.
+После установки: открой приложение, дай доступ к камере, дождись `Камера: OK`, затем нажми `✋` для включения отслеживания руки.
