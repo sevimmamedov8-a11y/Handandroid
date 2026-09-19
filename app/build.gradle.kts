@@ -10,7 +10,7 @@ android {
         applicationId = "com.handar.browser"
         minSdk = 24
         targetSdk = 36
-        versionCode = 10
+        versionCode = 12
         versionName = "1.0"
     }
 
@@ -18,6 +18,9 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
+            // Personal/test build: sign the release APK with the ephemeral Android debug key
+            // available on the GitHub runner so the artifact is directly installable.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

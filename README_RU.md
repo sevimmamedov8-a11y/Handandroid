@@ -1,14 +1,17 @@
-# HandARBrowser Android V11
+# HandARBrowser Android V12
 
 Отдельная Android-версия HandARBrowser для телефона в VR-очках.
 
-## Что исправлено в V11
+## Что исправлено в V12
 
 - `MainActivity` теперь наследуется от `androidx.activity.ComponentActivity`, поэтому корректно удовлетворяет `LifecycleOwner`, который нужен `ProcessCameraProvider.bindToLifecycle(...)`.
 - Для `MPImage` используются официальные Java-методы `getWidth()` и `getHeight()` вместо несуществующих `width()` / `height()`.
 - GitHub Actions переведён на `android-actions/setup-android@v4` и Node 24-compatible actions.
 - Runner закреплён на `ubuntu-24.04`, чтобы сборка не зависела от миграции `ubuntu-latest`.
 - Gradle 9.6.0 + Android Gradle Plugin 9.4.0 + JDK 17 сохранены: это совместимая связка для AGP 9.4.
+- Исправлена проверка результата Gradle: AGP может выдавать `app-release-unsigned.apk`, поэтому workflow больше не ожидает только одно имя файла.
+- APK нормализуется в `dist/HandARBrowser.apk` перед загрузкой artifact.
+- Release APK подписывается временным debug-ключом GitHub runner, чтобы полученный APK можно было установить для тестирования без отдельной подписи. Для следующей сборки подпись может отличаться, поэтому обновление поверх предыдущей тестовой сборки может потребовать удаления старой версии.
 - Перед сборкой workflow выполняет preflight-проверки именно тех мест, на которых упал предыдущий билд.
 
 ## Сборка

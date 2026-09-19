@@ -82,22 +82,43 @@ jobs:
           set -euo pipefail
           gradle --no-daemon --stacktrace :app:assembleRelease
 
-      - name: Verify APK
+      - name: Verify and normalize APK
         shell: bash
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/release/app-release.apk"
+          mkdir -p dist
+
+          mapfile -t APKS < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print | sort)
+          if [[ ${#APKS[@]} -eq 0 ]]; then
+            echo 'ERROR: Gradle finished successfully but no APK was produced.' >&2
+            find app/build/outputs -maxdepth 4 -type f -print 2>/dev/null || true
+            exit 1
+          fi
+
+          APK="${APKS[0]}"
+          echo "Found APK: $APK"
           test -s "$APK"
-          echo "APK: $APK"
-          ls -lh "$APK"
+          cp "$APK" dist/HandARBrowser.apk
+          test -s dist/HandARBrowser.apk
+          unzip -t "$APK" >/dev/null
+          echo "APK archive integrity: OK"
+          echo "Normalized APK: dist/HandARBrowser.apk"
+          ls -lh "$APK" dist/HandARBrowser.apk
+
           if command -v apkanalyzer >/dev/null 2>&1; then
-            apkanalyzer manifest application-id "$APK"
+            echo "Application ID:"
+            apkanalyzer manifest application-id "$APK" || true
+          fi
+
+          if command -v apksigner >/dev/null 2>&1; then
+            echo "APK signature:"
+            apksigner verify --verbose "$APK" || true
           fi
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: HandARBrowser-APK
-          path: app/build/outputs/apk/release/app-release.apk
+          path: dist/HandARBrowser.apk
           if-no-files-found: error
           retention-days: 14
