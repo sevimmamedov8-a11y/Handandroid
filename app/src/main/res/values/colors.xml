@@ -1,0 +1,9 @@
+<resources>
+    <color name="black">#000000</color>
+    <color name="panel">#CC101318</color>
+    <color name="panel_light">#DD1A1F27</color>
+    <color name="accent">#49A6FF</color>
+    <color name="success">#55E08A</color>
+    <color name="warning">#FFC533</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>
