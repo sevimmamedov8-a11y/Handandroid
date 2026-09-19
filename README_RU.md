@@ -1,40 +1,21 @@
-# HandARBrowser Android
+# HandARBrowser Android V11
 
-Отдельная Android-версия прототипа HandARBrowser под телефон в VR-очках.
+Отдельная Android-версия HandARBrowser для телефона в VR-очках.
 
-## Что есть в этой версии
+## Что исправлено в V11
 
-- задняя камера как фон;
-- два WebView для левого и правого глаза;
-- управление поворотом телефона через rotation/game rotation sensor;
-- отслеживание до двух рук через MediaPipe Hand Landmarker;
-- кончик указательного пальца как курсор;
-- pinch (большой + указательный) как клик;
-- удержание pinch + вертикальное движение как прокрутка;
-- LEFT / CENTER / RIGHT для настройки положения;
-- адресная строка и кнопки назад/вперёд/обновить;
-- экранная виртуальная клавиатура, которая работает с адресной строкой и web-полями;
-- GitHub Actions для автоматической сборки APK.
+- `MainActivity` теперь наследуется от `androidx.activity.ComponentActivity`, поэтому корректно удовлетворяет `LifecycleOwner`, который нужен `ProcessCameraProvider.bindToLifecycle(...)`.
+- Для `MPImage` используются официальные Java-методы `getWidth()` и `getHeight()` вместо несуществующих `width()` / `height()`.
+- GitHub Actions переведён на `android-actions/setup-android@v4` и Node 24-compatible actions.
+- Runner закреплён на `ubuntu-24.04`, чтобы сборка не зависела от миграции `ubuntu-latest`.
+- Gradle 9.6.0 + Android Gradle Plugin 9.4.0 + JDK 17 сохранены: это совместимая связка для AGP 9.4.
+- Перед сборкой workflow выполняет preflight-проверки именно тех мест, на которых упал предыдущий билд.
 
-## Важно
+## Сборка
 
-Это именно прототип для телефона в VR-очках. Окно браузера следует за движением устройства через датчик вращения. Это не полноценный ARKit/ARCore world-locked HUD и не настоящая стереокамера: одна задняя камера используется как источник изображения, а контент браузера показывается отдельно в двух глазах.
+1. Загрузить содержимое ZIP в отдельный GitHub-репозиторий.
+2. Сделать commit и Push в `main`.
+3. Открыть GitHub → Actions → `Build HandARBrowser Android`.
+4. После зелёной галочки открыть Artifacts → `HandARBrowser-APK`.
 
-## Сборка через GitHub без терминала
-
-1. Создай отдельный репозиторий, например `HandARBrowser-Android`.
-2. Распакуй содержимое этого ZIP в репозиторий.
-3. Загрузи файлы через GitHub Desktop и сделай Commit + Push.
-4. Открой GitHub → Actions → `Build HandARBrowser Android`.
-5. После зелёной галочки открой последний запуск и скачай Artifact `HandARBrowser-APK`.
-6. Внутри будет `app-release.apk`.
-
-Workflow сам скачивает модель `hand_landmarker.task`, поэтому модель не нужно искать вручную.
-
-## Почему проект Java
-
-Первая Android-версия сделана на Java, чтобы убрать зависимость от Kotlin compiler и сделать CI-проект проще. Android Gradle Plugin 9.4.0 и Gradle 9.6.0 соответствуют текущей официальной таблице совместимости Android Studio/AGP на момент подготовки архива.
-
-
-### Важно для GitHub Actions
-Workflow использует `android-actions/setup-android@v4` и не запрашивает устаревший пакет `tools`. Это специально сделано из-за изменения Android SDK, из-за которого `sdkmanager tools` теперь завершается ошибкой. Workflow использует AGP 9.4.0 + Gradle 9.6.0 + JDK 17.
+Полную APK-сборку в этом окружении я не заявляю как локально протестированную: здесь нет полного Android SDK/Gradle окружения. Сам CI workflow содержит предсборочные проверки и затем реальную сборку на GitHub runner.

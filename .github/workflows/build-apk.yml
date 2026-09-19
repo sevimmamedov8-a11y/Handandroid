@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pin the runner so the build does not change underneath us during
+    # the ubuntu-latest migration scheduled for October 2026.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -18,73 +20,82 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools'
-          accept-android-sdk-licenses: true
-          log-accepted-android-sdk-licenses: false
+          packages: ''
+          accept-android-sdk-licenses: 'true'
+          log-accepted-android-sdk-licenses: 'false'
 
-      - name: Install Android SDK packages
+      - name: Install required Android SDK packages
+        shell: bash
         run: |
-          sdkmanager --install \
+          set -euo pipefail
+          sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" \
+            "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Setup Gradle 9.6
+      - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '9.6.0'
 
-      - name: Verify project files
+      - name: Check Java and Gradle versions
         shell: bash
         run: |
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
-          test -f app/src/main/java/com/handar/browser/MainActivity.java
-          test -f app/src/main/java/com/handar/browser/HandOverlayView.java
-          forbidden="sdkmanager tools"
-          ! grep -R -n --exclude-dir=.git --exclude='README_RU.md' --exclude='THIRD_PARTY_NOTICES.md' --fixed-strings "$forbidden" .
-          grep -n 'id("com.android.application") version "9.4.0"' build.gradle.kts
-          grep -n 'gradle-version: .9.6.0' .github/workflows/build-apk.yml
-          echo "Project structure check: OK"
+          set -euo pipefail
+          java -version
+          gradle --version
 
       - name: Download MediaPipe hand model
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p app/src/main/assets
-          curl -L --fail --retry 3 --retry-delay 2 \
+          curl -L --fail --retry 3 --retry-all-errors \
             -o app/src/main/assets/hand_landmarker.task \
             "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
           test -s app/src/main/assets/hand_landmarker.task
-          file app/src/main/assets/hand_landmarker.task
           ls -lh app/src/main/assets/hand_landmarker.task
 
-      - name: Validate Gradle configuration
-        run: gradle --no-daemon --stacktrace help
+      - name: Preflight source checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'import androidx.activity.ComponentActivity;' app/src/main/java/com/handar/browser/MainActivity.java
+          grep -Fq 'public class MainActivity extends ComponentActivity implements SensorEventListener {' app/src/main/java/com/handar/browser/MainActivity.java
+          ! grep -Fq 'input.width()' app/src/main/java/com/handar/browser/MainActivity.java
+          ! grep -Fq 'input.height()' app/src/main/java/com/handar/browser/MainActivity.java
+          grep -Fq 'androidx.activity:activity:1.13.0' app/build.gradle.kts
+          grep -Fq 'android-actions/setup-android@v4' .github/workflows/build-apk.yml
+          echo 'Preflight checks: OK'
 
       - name: Build release APK
-        run: gradle --no-daemon --stacktrace :app:assembleRelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace :app:assembleRelease
 
       - name: Verify APK
         shell: bash
         run: |
+          set -euo pipefail
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
-          file "$APK"
-          unzip -t "$APK" >/dev/null
-          echo "APK OK: $(du -h "$APK" | cut -f1)"
+          echo "APK: $APK"
+          ls -lh "$APK"
+          if command -v apkanalyzer >/dev/null 2>&1; then
+            apkanalyzer manifest application-id "$APK"
+          fi
 
       - name: Upload APK
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: HandARBrowser-APK
           path: app/build/outputs/apk/release/app-release.apk

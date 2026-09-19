@@ -41,6 +41,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.activity:activity:1.13.0")
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")

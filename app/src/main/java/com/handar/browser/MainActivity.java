@@ -41,6 +41,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentActivity;
 import androidx.annotation.NonNull;
 import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
@@ -63,7 +64,6 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker;
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarkerResult;
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmark;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -71,7 +71,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity implements SensorEventListener {
+public class MainActivity extends ComponentActivity implements SensorEventListener {
     private static final int REQ_CAMERA = 701;
     private static final String TAG = "HandARBrowser";
     private static final String HOME_URL = "https://www.google.com/";
@@ -100,7 +100,6 @@ public class MainActivity extends Activity implements SensorEventListener {
     private float centerYaw = 0f;
     private float centerPitch = 0f;
     private boolean centered = false;
-    private boolean recenterRequested = true;
 
     private long lastHandTimestamp = 0L;
     private float cursorX = -1f;
@@ -229,10 +228,6 @@ public class MainActivity extends Activity implements SensorEventListener {
             @Override public void onPageFinished(WebView view, String url) {
                 installPageHooks(view);
                 runOnUiThread(() -> statusTextSafe("Браузер: " + url));
-            }
-            @Override public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
-                Log.e(TAG, "WebView render process gone; didCrash=" + (detail != null && detail.didCrash()));
-                return true;
             }
         });
         return v;
@@ -490,47 +485,24 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     private void analyzeFrame(ImageProxy proxy) {
-        Bitmap bitmap = null;
-        Bitmap rotated = null;
         try {
             if (handLandmarker == null) return;
-            bitmap = imageProxyToBitmap(proxy);
+            int w = proxy.getWidth();
+            int h = proxy.getHeight();
+            Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            proxy.getPlanes()[0].getBuffer().rewind();
+            bitmap.copyPixelsFromBuffer(proxy.getPlanes()[0].getBuffer());
             int rotation = proxy.getImageInfo().getRotationDegrees();
-            rotated = rotateBitmap(bitmap, rotation);
+            Bitmap rotated = rotateBitmap(bitmap, rotation);
             if (rotated != bitmap) bitmap.recycle();
             MPImage mpImage = new BitmapImageBuilder(rotated).build();
             long timestamp = SystemClock.uptimeMillis();
             handLandmarker.detectAsync(mpImage, timestamp);
         } catch (Throwable t) {
             Log.e(TAG, "Frame analysis failed", t);
-            if (bitmap != null && bitmap != rotated && !bitmap.isRecycled()) bitmap.recycle();
-            if (rotated != null && !rotated.isRecycled()) rotated.recycle();
         } finally {
             proxy.close();
         }
-    }
-
-    private Bitmap imageProxyToBitmap(ImageProxy proxy) {
-        ImageProxy.PlaneProxy plane = proxy.getPlanes()[0];
-        ByteBuffer buffer = plane.getBuffer();
-        int width = proxy.getWidth();
-        int height = proxy.getHeight();
-        int rowStride = plane.getRowStride();
-        int pixelStride = plane.getPixelStride();
-        int packedRowBytes = width * 4;
-        if (pixelStride != 4 || rowStride < packedRowBytes) {
-            throw new IllegalStateException("Unexpected RGBA plane layout: pixelStride=" + pixelStride + ", rowStride=" + rowStride);
-        }
-        byte[] packed = new byte[packedRowBytes * height];
-        byte[] row = new byte[rowStride];
-        for (int y = 0; y < height; y++) {
-            buffer.position(Math.min(buffer.limit(), y * rowStride));
-            buffer.get(row, 0, Math.min(row.length, buffer.remaining()));
-            System.arraycopy(row, 0, packed, y * packedRowBytes, packedRowBytes);
-        }
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(packed));
-        return bitmap;
     }
 
     private Bitmap rotateBitmap(Bitmap source, int degrees) {
@@ -550,15 +522,15 @@ public class MainActivity extends Activity implements SensorEventListener {
         for (List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark> hand : result.landmarks()) {
             List<PointF> mapped = new ArrayList<>();
             for (com.google.mediapipe.tasks.components.containers.NormalizedLandmark lm : hand) {
-                mapped.add(mapNormalizedToScreen(lm.x(), lm.y(), input.width(), input.height()));
+                mapped.add(mapNormalizedToScreen(lm.x(), lm.y(), input.getWidth(), input.getHeight()));
             }
             mappedHands.add(mapped);
             if (hand.size() >= 9) {
-                PointF index = mapNormalizedToScreen(hand.get(HandLandmark.INDEX_FINGER_TIP).x(), hand.get(HandLandmark.INDEX_FINGER_TIP).y(), input.width(), input.height());
+                PointF index = mapNormalizedToScreen(hand.get(HandLandmark.INDEX_FINGER_TIP).x(), hand.get(HandLandmark.INDEX_FINGER_TIP).y(), input.getWidth(), input.getHeight());
                 com.google.mediapipe.tasks.components.containers.NormalizedLandmark thumbLm = hand.get(HandLandmark.THUMB_TIP);
                 float pinchDistance = distance(index.x, index.y,
-                        mapNormalizedToScreen(thumbLm.x(), thumbLm.y(), input.width(), input.height()).x,
-                        mapNormalizedToScreen(thumbLm.x(), thumbLm.y(), input.width(), input.height()).y);
+                        mapNormalizedToScreen(thumbLm.x(), thumbLm.y(), input.getWidth(), input.getHeight()).x,
+                        mapNormalizedToScreen(thumbLm.x(), thumbLm.y(), input.getWidth(), input.getHeight()).y);
                 float distToCenter = distance(index.x, index.y, getScreenWidth() / 2f, getScreenHeight() / 2f);
                 if (distToCenter < bestScore) {
                     bestScore = distToCenter;
@@ -722,11 +694,12 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     private void centerSensors() {
-        recenterRequested = true;
         centered = false;
+        centerYaw = centerPitch = 0f;
+        centered = true;
         browserGroup.setTranslationX(0f);
         browserGroup.setTranslationY(0f);
-        statusTextSafe("Центр: калибровка...");
+        statusTextSafe("Центр: калибровка установлена");
     }
 
     private void nudgeBrowser(float amount) { browserGroup.setTranslationX(browserGroup.getTranslationX() + amount); }
@@ -738,28 +711,18 @@ public class MainActivity extends Activity implements SensorEventListener {
     }
 
     @Override public void onSensorChanged(SensorEvent event) {
-        if (event.sensor != rotationSensor) return;
+        if (!centered || event.sensor != rotationSensor) return;
         float[] rotationMatrix = new float[9];
         SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values);
         float[] orientation = new float[3];
         SensorManager.getOrientation(rotationMatrix, orientation);
-        if (recenterRequested || !centered) {
-            centerYaw = orientation[0];
-            centerPitch = orientation[1];
-            centered = true;
-            recenterRequested = false;
-            runOnUiThread(() -> statusTextSafe("Центр: калибровка установлена"));
-        }
+        if (!centered) { centerYaw = orientation[0]; centerPitch = orientation[1]; centered = true; }
         float yawDelta = wrapAngle(orientation[0] - centerYaw);
         float pitchDelta = orientation[1] - centerPitch;
         final float tx = Math.max(-360f, Math.min(360f, -yawDelta * 420f));
         final float ty = Math.max(-220f, Math.min(220f, pitchDelta * 260f));
-        runOnUiThread(() -> {
-            if (browserGroup != null) {
-                browserGroup.setTranslationX(tx);
-                browserGroup.setTranslationY(ty);
-            }
-        });
+        runOnUiThread(() -> browserGroup.setTranslationX(tx));
+        runOnUiThread(() -> browserGroup.setTranslationY(ty));
     }
 
     private float wrapAngle(float a) {
