@@ -128,22 +128,72 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        hideSystemBars();
-        getWindow().setNavigationBarColor(0x00000000);
+
+        // IMPORTANT: do not access WindowInsetsController before the content view
+        // is attached. On Android 16 getInsetsController() is nullable and can be
+        // null during early Activity startup. That was the immediate-start crash
+        // seen when launching on Android 16 / One UI 8.
         cameraExecutor = Executors.newSingleThreadExecutor();
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         rotationSensor = sensorManager != null ? sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) : null;
-        if (rotationSensor == null && sensorManager != null) rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
-        buildUi();
-        configureSensors();
-        if (hasCameraPermission()) startCamera(); else ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, REQ_CAMERA);
+        if (rotationSensor == null && sensorManager != null) {
+            rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+        }
+
+        try {
+            buildUi();
+        } catch (Throwable t) {
+            Log.e(TAG, "UI initialization failed", t);
+            buildFallbackUi();
+        }
+        hideSystemBars();
+
+        // Delay hardware/browser startup until the root view is attached. Each
+        // subsystem is independently guarded so one vendor implementation cannot
+        // take the whole app down.
+        root.post(() -> {
+            try {
+                configureSensors();
+            } catch (Throwable t) {
+                Log.e(TAG, "Sensor setup failed", t);
+                statusTextSafe("Датчики: недоступны • камера и браузер работают");
+            }
+        });
+
+        root.postDelayed(() -> {
+            try {
+                // The fallback UI has no camera preview fields. Do not attempt
+                // CameraX startup from that mode.
+                if (previewLeft == null || previewRight == null) return;
+                if (hasCameraPermission()) {
+                    startCamera();
+                } else {
+                    ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, REQ_CAMERA);
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "Camera startup scheduling failed", t);
+                statusTextSafe("Камера: ошибка запуска");
+            }
+        }, 150L);
     }
 
     private void hideSystemBars() {
         Window w = getWindow();
         if (android.os.Build.VERSION.SDK_INT >= 30) {
-            w.setDecorFitsSystemWindows(false);
-            w.getInsetsController().hide(WindowInsets.Type.systemBars());
+            // Android documents this controller as nullable. Apply it only after
+            // setContentView(), and tolerate vendor-specific nulls.
+            try {
+                w.setDecorFitsSystemWindows(false);
+                android.view.WindowInsetsController controller = w.getInsetsController();
+                if (controller != null) {
+                    controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                    controller.setSystemBarsBehavior(
+                            android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    );
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "Modern immersive mode unavailable", t);
+            }
         } else {
             w.getDecorView().setSystemUiVisibility(
                     View.SYSTEM_UI_FLAG_FULLSCREEN |
@@ -172,7 +222,6 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
         FrameLayout.LayoutParams bg = new FrameLayout.LayoutParams(-1, -1);
         browserGroup.setLayoutParams(bg);
         root.addView(browserGroup);
-        setupBrowserPair();
 
         overlay = new HandOverlayView(this);
         overlay.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
@@ -182,6 +231,20 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
         addBottomControls();
         addKeyboard();
         overlay.bringToFront();
+
+        // WebView/provider initialization is deferred until after the first UI
+        // frame. A broken or missing WebView provider must never prevent the app
+        // from opening the camera/HUD.
+        root.post(() -> {
+            try {
+                setupBrowserPair();
+                statusTextSafe("Браузер: готов • камера запускается...");
+            } catch (Throwable t) {
+                Log.e(TAG, "WebView initialization failed", t);
+                statusTextSafe("Браузер: недоступен • камера может работать");
+                Toast.makeText(this, "WebView не запустился. Остальной интерфейс оставлен активным.", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private void addHalf(View view, int side) {
@@ -707,8 +770,8 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
     }
 
     private void bothWeb(String js) {
-        webLeft.evaluateJavascript(js, null);
-        webRight.evaluateJavascript(js, null);
+        if (webLeft != null) { try { webLeft.evaluateJavascript(js, null); } catch (Throwable t) { Log.w(TAG, "Left WebView command failed", t); } }
+        if (webRight != null) { try { webRight.evaluateJavascript(js, null); } catch (Throwable t) { Log.w(TAG, "Right WebView command failed", t); } }
     }
 
     private void installPageHooks(WebView web) {
@@ -828,10 +891,12 @@ public class MainActivity extends ComponentActivity implements SensorEventListen
     }
 
     @Override protected void onDestroy() {
-        try { if (handLandmarker != null) handLandmarker.close(); } catch (Exception ignored) {}
+        try { if (sensorManager != null) sensorManager.unregisterListener(this); } catch (Throwable ignored) {}
+        try { if (cameraProvider != null) cameraProvider.unbindAll(); } catch (Throwable ignored) {}
+        try { if (handLandmarker != null) handLandmarker.close(); } catch (Throwable ignored) {}
+        if (webLeft != null) { try { webLeft.stopLoading(); webLeft.destroy(); } catch (Throwable ignored) {} }
+        if (webRight != null) { try { webRight.stopLoading(); webRight.destroy(); } catch (Throwable ignored) {} }
         if (cameraExecutor != null) cameraExecutor.shutdownNow();
-        if (webLeft != null) webLeft.destroy();
-        if (webRight != null) webRight.destroy();
         super.onDestroy();
     }
 

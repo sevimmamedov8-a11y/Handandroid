@@ -74,6 +74,9 @@ jobs:
           ! grep -Fq 'input.height()' app/src/main/java/com/handar/browser/MainActivity.java
           grep -Fq 'androidx.activity:activity:1.13.0' app/build.gradle.kts
           grep -Fq 'android-actions/setup-android@v4' .github/workflows/build-apk.yml
+          grep -Fq 'getInsetsController();' app/src/main/java/com/handar/browser/MainActivity.java
+          grep -Fq 'if (controller != null)' app/src/main/java/com/handar/browser/MainActivity.java
+          grep -Fq 'root.post(() -> {' app/src/main/java/com/handar/browser/MainActivity.java
           echo 'Preflight checks: OK'
 
       - name: Build release APK

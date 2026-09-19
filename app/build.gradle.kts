@@ -10,8 +10,8 @@ android {
         applicationId = "com.handar.browser"
         minSdk = 24
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.0"
+        versionCode = 14
+        versionName = "1.0.4"
     }
 
     buildTypes {
